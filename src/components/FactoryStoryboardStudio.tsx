@@ -382,20 +382,6 @@ export const FactoryStoryboardStudio: React.FC<FactoryStoryboardStudioProps> = (
       onNotify('Hãy bấm Bước 1 để sinh kịch bản 5 cảnh trước!', 'error');
       return;
     }
-    if (isCloudMode) {
-      const drafts: DraftJob[] = scenes.map((s) =>
-        createEmptyDraft({
-          prompt: s.videoPrompt6s,
-          aspectRatio: '9:16',
-          durationSeconds: 6,
-          model: videoModel,
-          inputType: s.keyframeAsset ? 'frames_to_video' : 'text_to_video',
-          firstFrameAsset: s.keyframeAsset,
-        })
-      );
-      onPushScenesToDrafts(drafts);
-      return;
-    }
 
     setLaunchingBatch(true);
     try {
@@ -409,7 +395,9 @@ export const FactoryStoryboardStudio: React.FC<FactoryStoryboardStudioProps> = (
       );
       onJobsLaunched(res.jobs, res.stats);
       onNotify(
-        'Đã đưa cả 5 phân cảnh (6s • 9:16) vào hàng đợi! Ngay khi tạo xong, FFmpeg sẽ tự động nối thành 1 video Full HD 30 giây.',
+        isCloudMode
+          ? res.project.statusMessage
+          : 'Đã đưa cả 5 phân cảnh (6s • 9:16) vào hàng đợi! Ngay khi tạo xong, FFmpeg sẽ tự động nối thành 1 video Full HD 30 giây.',
         'success'
       );
     } catch (err) {
@@ -824,26 +812,24 @@ export const FactoryStoryboardStudio: React.FC<FactoryStoryboardStudioProps> = (
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {!isCloudMode && (
-                <button
-                  type="button"
-                  disabled={generatingFrames}
-                  onClick={handleGenerateKeyframes}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 px-3.5 py-2.5 text-xs font-bold text-amber-200 transition"
-                >
-                  {generatingFrames ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Đang tạo 5 ảnh 9:16...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 text-amber-400" />
-                      Bước 2: Tạo 5 Ảnh Gốc 9:16 Đồng Nhất
-                    </>
-                  )}
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={generatingFrames}
+                onClick={handleGenerateKeyframes}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 px-3.5 py-2.5 text-xs font-bold text-amber-200 transition"
+              >
+                {generatingFrames ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Đang tạo 5 ảnh 9:16...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    Bước 2: Tạo 5 Ảnh Gốc 9:16 Đồng Nhất
+                  </>
+                )}
+              </button>
 
               <button
                 type="button"
@@ -854,13 +840,13 @@ export const FactoryStoryboardStudio: React.FC<FactoryStoryboardStudioProps> = (
                 {launchingBatch ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Đang đưa vào hàng đợi...
+                    Đang khởi chạy 5 cảnh...
                   </>
                 ) : (
                   <>
                     <Rocket className="w-4 h-4" />
                     {isCloudMode
-                      ? 'Đẩy Cả 5 Cảnh (6s • 9:16) Sang Trình Tạo Video'
+                      ? 'Bước 3: Tạo Cả 5 Cảnh 6s (Qua Gemini API Trình Duyệt)'
                       : 'Bước 3: Tự Động Tạo 5 Cảnh & Ghép MP4 30s Full HD'}
                   </>
                 )}

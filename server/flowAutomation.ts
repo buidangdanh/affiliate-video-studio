@@ -630,6 +630,101 @@ class FlowBrowserManager {
 
   private async configureFlowOptions(page: Page, job: VideoJob): Promise<void> {
     try {
+      // 1. Open 2026 Flow settings pill if present (e.g. "Video · 720p · ...", "Image · ...", "Nano Banana Pro")
+      const settingsPill = page
+        .locator('button:visible')
+        .filter({
+          hasText:
+            /(Video\s*·|Image\s*·|Nano Banana|Omni\s*1\.|Veo\s*3|720p\s*·|360p\s*·)/i,
+        })
+        .last();
+
+      if ((await settingsPill.count()) > 0) {
+        await settingsPill.click({ timeout: 2500 }).catch(() => {});
+        await page.waitForTimeout(450);
+
+        // Ensure "Video" tab is active (not "Image")
+        const videoTabBtn = page
+          .locator('button:visible, [role="tab"]:visible, [role="radio"]:visible')
+          .filter({ hasText: /^\s*Video\s*$/i })
+          .first();
+        if ((await videoTabBtn.count()) > 0) {
+          await videoTabBtn.click({ timeout: 1500 }).catch(() => {});
+          await page.waitForTimeout(300);
+        }
+
+        // Select "Frames" when start/end frame is provided, or "Ingredients" for reference image
+        if (job.inputType === 'frames_to_video' && (job.firstFrameAsset || job.lastFrameAsset)) {
+          const framesBtn = page
+            .locator('button:visible, [role="tab"]:visible, [role="radio"]:visible')
+            .filter({ hasText: /^\s*(Frames|Khung hình)\s*$/i })
+            .first();
+          if ((await framesBtn.count()) > 0) {
+            await framesBtn.click({ timeout: 1500 }).catch(() => {});
+            await page.waitForTimeout(250);
+          }
+        } else if (job.inputType === 'image_to_video' && job.imageAsset) {
+          const ingBtn = page
+            .locator('button:visible, [role="tab"]:visible, [role="radio"]:visible')
+            .filter({ hasText: /^\s*(Frames|Ingredients|Thành phần)\s*$/i })
+            .first();
+          if ((await ingBtn.count()) > 0) {
+            await ingBtn.click({ timeout: 1500 }).catch(() => {});
+            await page.waitForTimeout(250);
+          }
+        }
+
+        // Aspect Ratio (9:16 or 16:9)
+        const targetRatio = job.aspectRatio === '9:16' ? '9:16' : '16:9';
+        const ratioBtn = page
+          .locator('button:visible, [role="radio"]:visible, [role="option"]:visible')
+          .filter({ hasText: new RegExp(`^\\s*${targetRatio}\\s*$`) })
+          .first();
+        if ((await ratioBtn.count()) > 0) {
+          await ratioBtn.click({ timeout: 1500 }).catch(() => {});
+          await page.waitForTimeout(200);
+        }
+
+        // Resolution 720p
+        const res720 = page
+          .locator('button:visible, [role="radio"]:visible')
+          .filter({ hasText: /^\s*720p\s*$/i })
+          .first();
+        if ((await res720.count()) > 0) {
+          await res720.click({ timeout: 1200 }).catch(() => {});
+          await page.waitForTimeout(150);
+        }
+
+        // Duration (4s / 6s / 8s / 10s)
+        const durSec = Number(job.durationSeconds) || 6;
+        const snappedDur = durSec <= 4 ? 4 : durSec <= 6 ? 6 : durSec <= 8 ? 8 : 10;
+        const durBtn = page
+          .locator('button:visible, [role="radio"]:visible')
+          .filter({ hasText: new RegExp(`^\\s*${snappedDur}s\\s*$`, 'i') })
+          .first();
+        if ((await durBtn.count()) > 0) {
+          await durBtn.click({ timeout: 1200 }).catch(() => {});
+          await page.waitForTimeout(150);
+        }
+
+        // Output count (x1..x4)
+        const wantedCount = Math.max(1, Math.min(4, job.outputCount || 1));
+        const countBtn = page
+          .locator('button:visible, [role="radio"]:visible')
+          .filter({ hasText: new RegExp(`^\\s*x${wantedCount}\\s*$`, 'i') })
+          .first();
+        if ((await countBtn.count()) > 0) {
+          await countBtn.click({ timeout: 1200 }).catch(() => {});
+          await page.waitForTimeout(150);
+        }
+
+        // Close popup by pressing Escape gently
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(250);
+        return;
+      }
+
+      // 2. Fallback for legacy Flow UI
       const desiredModePatterns =
         job.inputType === 'text_to_video'
           ? [/text to video/i, /tạo video từ văn bản/i, /từ văn bản/i]

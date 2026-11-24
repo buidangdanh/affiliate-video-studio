@@ -173,15 +173,52 @@ export async function closeFlowChrome(): Promise<{ flowStatus: FlowBrowserStatus
   return fetchApiJson('/api/flow/close', { method: 'POST' });
 }
 
+export function subscribeCloudUpdates(
+  fn: (payload: {
+    jobs: VideoJob[];
+    stats: QueueStats;
+    factoryProjects: FactoryProject[];
+  }) => void
+): () => void {
+  return standaloneClient.subscribe(fn);
+}
+
+async function fileToResizedDataUrl(file: File, maxDim = 1080): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Không thể đọc file ảnh.'));
+    reader.onload = () => {
+      const rawUrl = String(reader.result || '');
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(rawUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
+      };
+      img.onerror = () => resolve(rawUrl);
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function uploadImageFile(file: File): Promise<UploadedAsset> {
   if (cloudModeActive) {
-    const objectUrl = URL.createObjectURL(file);
+    const dataUrl = await fileToResizedDataUrl(file);
     return {
-      id: `local-asset-${Date.now()}`,
+      id: `local-asset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       filename: file.name,
       originalName: file.name,
-      mimeType: file.type || 'image/png',
-      url: objectUrl,
+      mimeType: 'image/jpeg',
+      url: dataUrl,
       size: file.size,
     };
   }
@@ -410,9 +447,7 @@ export async function generateFactoryKeyframesApi(
   projectId: string
 ): Promise<{ usedAiImageModel: string | null; project: FactoryProject }> {
   if (cloudModeActive) {
-    throw new Error(
-      'Tạo ảnh khung hình trên ổ đĩa và ghép FFmpeg cần chạy bản Local Server (npm run dev). Trên bản Web Online bạn có thể Copy câu lệnh tạo ảnh 9:16 sang Google Flow!'
-    );
+    return standaloneClient.generateFactoryKeyframesCloud(projectId);
   }
   return fetchApiJson(`/api/factory/projects/${projectId}/generate-keyframes`, {
     method: 'POST',
@@ -425,9 +460,7 @@ export async function launchFactoryBatchApi(projectId: string): Promise<{
   stats: QueueStats;
 }> {
   if (cloudModeActive) {
-    throw new Error(
-      'Để tự động render 5 phân cảnh 6s và dùng FFmpeg ghép thành 1 file MP4 30s Full HD, vui lòng mở trên bản Local Server (http://localhost:5173).'
-    );
+    return standaloneClient.launchFactoryBatchCloud(projectId);
   }
   return fetchApiJson(`/api/factory/projects/${projectId}/launch`, {
     method: 'POST',

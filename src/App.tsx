@@ -29,6 +29,7 @@ import {
   retryAllFailedJobs,
   retrySingleJob,
   submitJobsBatch,
+  subscribeCloudUpdates,
   updateSystemSettings,
 } from './api';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -111,6 +112,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubCloud: (() => void) | null = null;
     let unmounted = false;
 
     const connectSse = () => {
@@ -188,6 +190,12 @@ export const App: React.FC = () => {
         }
         if (data.isCloudMode) {
           setIsCloudMode(true);
+          unsubCloud = subscribeCloudUpdates((cloudPayload) => {
+            if (unmounted) return;
+            setJobs([...cloudPayload.jobs]);
+            setStats(cloudPayload.stats);
+            setFactoryProjects([...cloudPayload.factoryProjects]);
+          });
         } else {
           connectSse();
         }
@@ -199,6 +207,7 @@ export const App: React.FC = () => {
     return () => {
       unmounted = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (unsubCloud) unsubCloud();
       es?.close();
     };
   }, []);

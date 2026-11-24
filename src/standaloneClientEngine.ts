@@ -1,3 +1,4 @@
+import { GoogleGenAI } from '@google/genai';
 import {
   buildInitialAffiliateCatalog,
   computeSellerTrustScore,
@@ -37,8 +38,52 @@ import type {
   ProviderMode,
   PublicSystemSettings,
   QueueStats,
+  UploadedAsset,
   VideoJob,
 } from './types';
+
+function parseDataUrl(url?: string): { mimeType: string; data: string } | null {
+  if (!url || !url.startsWith('data:')) return null;
+  const match = url.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+async function composeCanvas916DataUrl(
+  sourceUrl: string | null,
+  sceneNumber: number
+): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 720;
+  canvas.height = 1280;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 1280);
+  grad.addColorStop(0, '#0f172a');
+  grad.addColorStop(1, '#1e293b');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 720, 1280);
+
+  if (sourceUrl) {
+    await new Promise<void>((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const zoom = 1 + ((sceneNumber - 1) % 3) * 0.05;
+        const ratio = Math.min((720 * zoom) / img.width, (1280 * zoom) / img.height);
+        const w = img.width * ratio;
+        const h = img.height * ratio;
+        ctx.drawImage(img, (720 - w) / 2, (1280 - h) / 2, w, h);
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = sourceUrl;
+    });
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
 
 const LS_AFFILIATE_KEY = 'tao_affiliate_cloud_state_v1';
 const LS_SETTINGS_KEY = 'tao_video_cloud_settings_v1';
@@ -253,6 +298,37 @@ function buildDailyReport(
 }
 
 class StandaloneClientEngine {
+  private inMemoryJobs: VideoJob[] | null = null;
+  private listeners = new Set<
+    (payload: {
+      jobs: VideoJob[];
+      stats: QueueStats;
+      factoryProjects: FactoryProject[];
+    }) => void
+  >();
+
+  public subscribe(
+    fn: (payload: {
+      jobs: VideoJob[];
+      stats: QueueStats;
+      factoryProjects: FactoryProject[];
+    }) => void
+  ): () => void {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+
+  private emitCloudState(): void {
+    const payload = {
+      jobs: this.getJobs(),
+      stats: this.getStats(),
+      factoryProjects: this.getFactoryProjects(),
+    };
+    this.listeners.forEach((fn) => fn(payload));
+  }
+
   private loadAffiliate(): CloudAffiliatePersisted {
     try {
       const raw = localStorage.getItem(LS_AFFILIATE_KEY);
@@ -358,21 +434,35 @@ class StandaloneClientEngine {
   }
 
   public getJobs(): VideoJob[] {
+    if (this.inMemoryJobs) return this.inMemoryJobs;
     try {
       const raw = localStorage.getItem(LS_JOBS_KEY);
-      if (raw) return JSON.parse(raw) as VideoJob[];
+      if (raw) {
+        this.inMemoryJobs = JSON.parse(raw) as VideoJob[];
+        return this.inMemoryJobs;
+      }
     } catch {
       // Ignore
     }
-    return [];
+    this.inMemoryJobs = [];
+    return this.inMemoryJobs;
   }
 
   private saveJobs(jobs: VideoJob[]): void {
+    this.inMemoryJobs = jobs;
     try {
-      localStorage.setItem(LS_JOBS_KEY, JSON.stringify(jobs));
+      // Strip heavy data URLs inside imageAsset before writing to localStorage quota
+      const compact = jobs.map((j) => ({
+        ...j,
+        imageAsset: null,
+        firstFrameAsset: null,
+        lastFrameAsset: null,
+      }));
+      localStorage.setItem(LS_JOBS_KEY, JSON.stringify(compact));
     } catch {
-      // Ignore
+      // Ignore quota errors
     }
+    this.emitCloudState();
   }
 
   public getStats(): QueueStats {
@@ -912,6 +1002,7 @@ Chỉ trả về JSON hợp lệ theo mẫu:
   } {
     const existing = this.getJobs();
     const s = this.loadSettings();
+    const hasKey = s.geminiApiKey.trim().length > 0;
     const nowIso = new Date().toISOString();
     const created: VideoJob[] = drafts.map((d, idx) => ({
       id: `cloud-job-${Date.now()}-${idx}`,
@@ -921,24 +1012,183 @@ Chỉ trả về JSON hợp lệ theo mẫu:
       model: d.model,
       aspectRatio: d.aspectRatio,
       outputCount: d.outputCount,
-      durationSeconds: d.durationSeconds || 8,
+      durationSeconds: d.durationSeconds || 6,
+      imageAsset: d.imageAsset || null,
+      firstFrameAsset: d.firstFrameAsset || null,
+      lastFrameAsset: d.lastFrameAsset || null,
       status: 'queued',
       progress: 0,
-      statusMessage:
-        'Đã lưu vào danh sách chờ trên Web Online (Chạy bản Local Server để xuất file video MP4 thực tế)',
+      statusMessage: hasKey
+        ? 'Đang chờ tạo video trực tiếp qua Gemini API trên trình duyệt...'
+        : 'Chưa nhập Gemini API Key ở Cấu Hình — hãy nhập Gemini API Key để render video trực tiếp trên Web Online (hoặc Copy câu lệnh dán qua Google Flow)',
       retryCount: 0,
-      providerMode: s.providerMode,
+      providerMode: hasKey ? 'gemini' : s.providerMode,
       outputs: [],
       createdAt: nowIso,
     }));
 
     const next = [...existing, ...created];
     this.saveJobs(next);
+
+    if (hasKey) {
+      void this.runCloudVideoQueue();
+    }
+
     return {
       createdCount: created.length,
       jobs: created,
       stats: this.getStats(),
     };
+  }
+
+  private isCloudRunnerBusy = false;
+
+  private async runCloudVideoQueue(): Promise<void> {
+    if (this.isCloudRunnerBusy) return;
+    const apiKey = this.loadSettings().geminiApiKey.trim();
+    if (!apiKey) return;
+
+    this.isCloudRunnerBusy = true;
+    try {
+      const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1beta' });
+      while (true) {
+        const jobs = this.getJobs();
+        const nextJob = jobs.find((j) => j.status === 'queued');
+        if (!nextJob) break;
+
+        const targetModel = nextJob.model.toLowerCase().includes('1.1')
+          ? 'gemini-omni-1.1-flash'
+          : 'gemini-omni-1.2-flash';
+
+        nextJob.status = 'running';
+        nextJob.progress = 12;
+        nextJob.startedAt = new Date().toISOString();
+        nextJob.statusMessage = `[Web Online • ${targetModel}] Đang gửi yêu cầu tạo video ${nextJob.durationSeconds}s...`;
+        this.saveJobs([...jobs]);
+
+        try {
+          const inputBlocks: Array<Record<string, unknown>> = [];
+          const frameAsset =
+            nextJob.inputType === 'frames_to_video'
+              ? nextJob.firstFrameAsset
+              : nextJob.inputType === 'image_to_video'
+                ? nextJob.imageAsset
+                : null;
+          const parsedImg = parseDataUrl(frameAsset?.url);
+          if (parsedImg) {
+            inputBlocks.push({
+              type: 'image',
+              data: parsedImg.data,
+              mime_type: parsedImg.mimeType,
+            });
+            inputBlocks.push({
+              type: 'text',
+              text: `Generate a smooth video starting from this frame. ${nextJob.prompt}`,
+            });
+          } else {
+            inputBlocks.push({ type: 'text', text: nextJob.prompt });
+          }
+
+          const interaction = await ai.interactions.create({
+            api_version: 'v1beta',
+            model: targetModel,
+            input: inputBlocks as never,
+            response_format: {
+              type: 'video',
+              aspect_ratio: nextJob.aspectRatio === '9:16' ? '9:16' : '16:9',
+              duration: `${nextJob.durationSeconds || 6}s`,
+              resolution: '720p',
+            },
+            background: true,
+          });
+
+          let current = interaction as unknown as {
+            id: string;
+            status: string;
+            steps?: Array<{
+              type?: string;
+              content?: Array<{
+                type?: string;
+                data?: string;
+                uri?: string;
+                mime_type?: string;
+              }>;
+            }>;
+            errors?: Array<{ code?: string | number; message?: string }>;
+          };
+
+          let poll = 0;
+          while (current.status === 'in_progress') {
+            poll++;
+            nextJob.progress = Math.min(90, 15 + poll * 10);
+            nextJob.statusMessage = `[Web Online • ${targetModel}] Đang render trên máy chủ Google (${poll * 6}s)...`;
+            this.saveJobs([...this.getJobs()]);
+            await new Promise((r) => setTimeout(r, 6000));
+            current = (await ai.interactions.get(current.id, {
+              api_version: 'v1beta',
+            })) as unknown as typeof current;
+          }
+
+          if (current.status !== 'completed') {
+            const msg =
+              current.errors?.[0]?.message || `Trạng thái: ${current.status}`;
+            throw new Error(msg);
+          }
+
+          let videoUrl = '';
+          for (const step of current.steps || []) {
+            if (step.type === 'model_output' && Array.isArray(step.content)) {
+              for (const b of step.content) {
+                if (b.type === 'video' && b.data) {
+                  const byteChars = atob(b.data);
+                  const bytes = new Uint8Array(byteChars.length);
+                  for (let k = 0; k < byteChars.length; k++) {
+                    bytes[k] = byteChars.charCodeAt(k);
+                  }
+                  const blob = new Blob([bytes], {
+                    type: b.mime_type || 'video/mp4',
+                  });
+                  videoUrl = URL.createObjectURL(blob);
+                  break;
+                } else if (b.type === 'video' && b.uri) {
+                  videoUrl = b.uri;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!videoUrl) {
+            throw new Error('Không nhận được dữ liệu video đầu ra từ Gemini API.');
+          }
+
+          const filename = `scene_${nextJob.seq}_${Date.now()}.mp4`;
+          nextJob.status = 'completed';
+          nextJob.progress = 100;
+          nextJob.executedProvider = 'gemini';
+          nextJob.completedAt = new Date().toISOString();
+          nextJob.statusMessage = 'Hoàn thành trực tiếp trên trình duyệt!';
+          nextJob.outputs = [
+            {
+              index: 1,
+              filename,
+              url: videoUrl,
+              downloadUrl: videoUrl,
+              mimeType: 'video/mp4',
+            },
+          ];
+          this.saveJobs([...this.getJobs()]);
+        } catch (err) {
+          nextJob.status = 'failed';
+          nextJob.error =
+            err instanceof Error ? err.message : 'Lỗi tạo video trực tuyến';
+          nextJob.statusMessage = 'Tạo video thất bại';
+          this.saveJobs([...this.getJobs()]);
+        }
+      }
+    } finally {
+      this.isCloudRunnerBusy = false;
+    }
   }
 
   // ==========================================
@@ -968,6 +1218,8 @@ Chỉ trả về JSON hợp lệ theo mẫu:
     productHighlights?: string;
     stylePreset?: FactoryStylePreset;
     mcOutfitPreset?: McOutfitPreset;
+    productAssets?: UploadedAsset[];
+    mcFaceAsset?: UploadedAsset | null;
   }): Promise<{
     usedAiVision: boolean;
     masterPromptUsed: string;
@@ -998,21 +1250,23 @@ Chỉ trả về JSON hợp lệ theo mẫu:
         stylePreset,
         mcOutfitPreset
       );
-      const res = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `${masterPromptUsed}
-Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
+
+      const parts: Array<Record<string, unknown>> = [];
+      for (const a of (input.productAssets || []).slice(0, 5)) {
+        const p = parseDataUrl(a.url);
+        if (p) {
+          parts.push({ inline_data: { mime_type: p.mimeType, data: p.data } });
+        }
+      }
+      if (input.mcFaceAsset) {
+        const m = parseDataUrl(input.mcFaceAsset.url);
+        if (m) {
+          parts.push({ inline_data: { mime_type: m.mimeType, data: m.data } });
+        }
+      }
+      parts.push({
+        text: `${masterPromptUsed}
+Hãy quan sát kỹ các ảnh sản phẩm đính kèm và trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
 {
   "scenes": [
     {
@@ -1025,10 +1279,18 @@ Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
     }
   ]
 }`,
-                  },
-                ],
-              },
-            ],
+      });
+
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts }],
             generationConfig: {
               temperature: 0.45,
               responseMimeType: 'application/json',
@@ -1107,6 +1369,8 @@ Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
     stylePreset?: FactoryStylePreset;
     mcOutfitPreset?: McOutfitPreset;
     videoModel?: string;
+    productAssets?: UploadedAsset[];
+    mcFaceAsset?: UploadedAsset | null;
     masterPromptUsed?: string;
     scenes: FactorySceneItem[];
   }): FactoryProject {
@@ -1122,6 +1386,11 @@ Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
         stylePreset: payload.stylePreset || list[existingIdx].stylePreset,
         mcOutfitPreset: payload.mcOutfitPreset || list[existingIdx].mcOutfitPreset,
         videoModel: payload.videoModel || list[existingIdx].videoModel,
+        productAssets: payload.productAssets || list[existingIdx].productAssets || [],
+        mcFaceAsset:
+          payload.mcFaceAsset !== undefined
+            ? payload.mcFaceAsset
+            : list[existingIdx].mcFaceAsset,
         masterPromptUsed: payload.masterPromptUsed || list[existingIdx].masterPromptUsed,
         scenes: payload.scenes,
         updatedAt: nowIso,
@@ -1138,13 +1407,13 @@ Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
       stylePreset: payload.stylePreset || 'factory_conveyor',
       mcOutfitPreset: payload.mcOutfitPreset || 'cream_polo',
       videoModel: payload.videoModel || 'gemini-omni-1.1-flash',
-      productAssets: [],
-      mcFaceAsset: null,
+      productAssets: payload.productAssets || [],
+      mcFaceAsset: payload.mcFaceAsset || null,
       masterPromptUsed: payload.masterPromptUsed || '',
       scenes: payload.scenes,
       status: 'draft',
       statusMessage:
-        'Đã sinh trọn bộ 5 phân cảnh AIDA Kho Xưởng. Bạn có thể copy từng câu lệnh sang Google Flow hoặc chạy bản Local để tự động render & ghép MP4 30s!',
+        'Đã sinh trọn bộ 5 phân cảnh AIDA Kho Xưởng trên Web Online!',
       stitchedOutput: null,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -1153,6 +1422,156 @@ Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
     list.unshift(created);
     this.saveFactoryProjects(list);
     return created;
+  }
+
+  public async generateFactoryKeyframesCloud(projectId: string): Promise<{
+    usedAiImageModel: string | null;
+    project: FactoryProject;
+  }> {
+    const list = this.getFactoryProjects();
+    const project = list.find((p) => p.id === projectId);
+    if (!project) throw new Error('Không tìm thấy dự án 5 cảnh.');
+
+    const apiKey = this.loadSettings().geminiApiKey.trim();
+    let imgModel: string | null = null;
+    if (apiKey) {
+      try {
+        const mRes = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',
+          { headers: { 'x-goog-api-key': apiKey } }
+        );
+        if (mRes.ok) {
+          const mData = (await mRes.json()) as {
+            models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+          };
+          const names = (mData.models || [])
+            .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+            .map((m) => String(m.name || '').replace(/^models\//, ''));
+          imgModel =
+            names.find((n) =>
+              /flash-image|image-generation|nano-banana|gemini-2\.5-flash-image|gemini-3.*image/i.test(
+                n
+              )
+            ) || null;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    const ai = apiKey && imgModel ? new GoogleGenAI({ apiKey }) : null;
+    let scene1DataUrl: string | null = null;
+    let usedModel: string | null = null;
+
+    for (let i = 0; i < project.scenes.length; i++) {
+      const sc = project.scenes[i];
+      let finalDataUrl = '';
+
+      if (ai && imgModel) {
+        try {
+          const parts: Array<Record<string, unknown>> = [];
+          if (i > 0 && scene1DataUrl) {
+            const p1 = parseDataUrl(scene1DataUrl);
+            if (p1) parts.push({ inlineData: { mimeType: p1.mimeType, data: p1.data } });
+          }
+          for (const a of (project.productAssets || []).slice(0, 5)) {
+            const pa = parseDataUrl(a.url);
+            if (pa) parts.push({ inlineData: { mimeType: pa.mimeType, data: pa.data } });
+          }
+          if (project.mcFaceAsset) {
+            const pm = parseDataUrl(project.mcFaceAsset.url);
+            if (pm) parts.push({ inlineData: { mimeType: pm.mimeType, data: pm.data } });
+          }
+          parts.push({
+            text: `Generate a photorealistic vertical 9:16 portrait smartphone photograph: ${sc.imagePrompt916}. No text or watermarks.`,
+          });
+
+          const resp = await ai.models.generateContent({
+            model: imgModel,
+            contents: [{ role: 'user', parts }],
+            config: { responseModalities: ['IMAGE', 'TEXT'] },
+          });
+          const imgPart = (resp.candidates?.[0]?.content?.parts || []).find(
+            (pt) => pt.inlineData && pt.inlineData.data
+          );
+          if (imgPart?.inlineData?.data) {
+            finalDataUrl = `data:${imgPart.inlineData.mimeType || 'image/png'};base64,${imgPart.inlineData.data}`;
+            usedModel = imgModel;
+          }
+        } catch {
+          // Fallback to canvas framing
+        }
+      }
+
+      if (!finalDataUrl) {
+        const ref =
+          project.productAssets[i % Math.max(1, project.productAssets.length)]?.url ||
+          project.mcFaceAsset?.url ||
+          null;
+        finalDataUrl = await composeCanvas916DataUrl(ref, sc.sceneNumber);
+      }
+
+      const asset: UploadedAsset = {
+        id: `cloud-frame-${Date.now()}-${i}`,
+        filename: `Canh_${sc.sceneNumber}_9x16.jpg`,
+        originalName: `Canh_${sc.sceneNumber}_9x16.jpg`,
+        mimeType: 'image/jpeg',
+        url: finalDataUrl,
+        size: finalDataUrl.length,
+      };
+      sc.keyframeAsset = asset;
+      if (i === 0) scene1DataUrl = finalDataUrl;
+    }
+
+    project.statusMessage = usedModel
+      ? `Đã tạo 5 ảnh gốc 9:16 đồng nhất bằng AI (${usedModel}) ngay trên trình duyệt!`
+      : 'Đã chuẩn bị 5 khung hình chuẩn 9:16 từ ảnh sản phẩm của bạn!';
+    project.updatedAt = new Date().toISOString();
+    this.saveFactoryProjects(list);
+    this.emitCloudState();
+    return { usedAiImageModel: usedModel, project };
+  }
+
+  public launchFactoryBatchCloud(projectId: string): {
+    project: FactoryProject;
+    jobs: VideoJob[];
+    stats: QueueStats;
+  } {
+    const list = this.getFactoryProjects();
+    const project = list.find((p) => p.id === projectId);
+    if (!project) throw new Error('Không tìm thấy dự án 5 cảnh.');
+
+    const drafts: DraftJob[] = project.scenes.map((sc, idx) => {
+      const refAsset =
+        sc.keyframeAsset ||
+        project.productAssets[idx % Math.max(1, project.productAssets.length)] ||
+        null;
+      return {
+        localId: `cloud-draft-${idx}`,
+        selected: true,
+        prompt: sc.videoPrompt6s,
+        inputType: refAsset ? 'frames_to_video' : 'text_to_video',
+        model: project.videoModel || 'gemini-omni-1.1-flash',
+        aspectRatio: '9:16',
+        outputCount: 1,
+        durationSeconds: 6,
+        imageAsset: null,
+        firstFrameAsset: refAsset,
+        lastFrameAsset: null,
+      };
+    });
+
+    const batch = this.enqueueCloudDrafts(drafts);
+    project.scenes.forEach((sc, idx) => {
+      sc.linkedJobId = batch.jobs[idx]?.id || null;
+    });
+    project.status = 'generating_clips';
+    project.statusMessage = this.loadSettings().geminiApiKey.trim()
+      ? 'Đang tạo trực tiếp 5 phân cảnh 6s bằng Gemini API ngay trên trình duyệt!'
+      : 'Đã đưa 5 cảnh vào Hàng Đợi (Nhập Gemini API Key ở Cấu Hình để chạy trực tiếp, hoặc Copy từng câu lệnh sang Google Flow)!';
+    this.saveFactoryProjects(list);
+    this.emitCloudState();
+    return { project, jobs: batch.jobs, stats: batch.stats };
   }
 }
 
