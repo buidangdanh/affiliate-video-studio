@@ -14,6 +14,12 @@ import type {
   SeasonId,
   SellerBadge,
 } from './affiliateTypes';
+import type {
+  FactoryProject,
+  FactorySceneItem,
+  FactoryStylePreset,
+  McOutfitPreset,
+} from './factoryTypes';
 import { standaloneClient } from './standaloneClientEngine';
 
 export interface InitialStateResponse {
@@ -22,6 +28,7 @@ export interface InitialStateResponse {
   settings: PublicSystemSettings;
   flowStatus: FlowBrowserStatus;
   affiliate?: AffiliateRadarSnapshot;
+  factoryProjects?: FactoryProject[];
   isCloudMode?: boolean;
 }
 
@@ -57,6 +64,7 @@ export async function fetchInitialState(): Promise<InitialStateResponse> {
       settings: standaloneClient.getPublicSettings(),
       flowStatus: standaloneClient.getFlowStatus(),
       affiliate: standaloneClient.getAffiliateSnapshot(),
+      factoryProjects: standaloneClient.getFactoryProjects(),
       isCloudMode: true,
     };
   }
@@ -347,5 +355,92 @@ export async function importAffiliateProducts(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ records }),
+  });
+}
+
+// ====================================================
+// Factory 5-Scene AIDA Storyboard & Auto-Stitch API
+// ====================================================
+
+export async function generateFactoryScriptApi(payload: {
+  productName: string;
+  productHighlights?: string;
+  stylePreset?: FactoryStylePreset;
+  mcOutfitPreset?: McOutfitPreset;
+  productAssets?: UploadedAsset[];
+  mcFaceAsset?: UploadedAsset | null;
+}): Promise<{
+  usedAiVision: boolean;
+  masterPromptUsed: string;
+  scenes: FactorySceneItem[];
+}> {
+  if (cloudModeActive) {
+    return standaloneClient.generateFactoryScriptCloud(payload);
+  }
+  return fetchApiJson('/api/factory/generate-script', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function saveFactoryProjectApi(payload: {
+  id?: string;
+  productName: string;
+  productHighlights?: string;
+  stylePreset?: FactoryStylePreset;
+  mcOutfitPreset?: McOutfitPreset;
+  videoModel?: string;
+  productAssets?: UploadedAsset[];
+  mcFaceAsset?: UploadedAsset | null;
+  masterPromptUsed?: string;
+  scenes: FactorySceneItem[];
+}): Promise<{ project: FactoryProject }> {
+  if (cloudModeActive) {
+    return { project: standaloneClient.saveFactoryProjectCloud(payload) };
+  }
+  return fetchApiJson('/api/factory/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function generateFactoryKeyframesApi(
+  projectId: string
+): Promise<{ usedAiImageModel: string | null; project: FactoryProject }> {
+  if (cloudModeActive) {
+    throw new Error(
+      'Tạo ảnh khung hình trên ổ đĩa và ghép FFmpeg cần chạy bản Local Server (npm run dev). Trên bản Web Online bạn có thể Copy câu lệnh tạo ảnh 9:16 sang Google Flow!'
+    );
+  }
+  return fetchApiJson(`/api/factory/projects/${projectId}/generate-keyframes`, {
+    method: 'POST',
+  });
+}
+
+export async function launchFactoryBatchApi(projectId: string): Promise<{
+  project: FactoryProject;
+  jobs: VideoJob[];
+  stats: QueueStats;
+}> {
+  if (cloudModeActive) {
+    throw new Error(
+      'Để tự động render 5 phân cảnh 6s và dùng FFmpeg ghép thành 1 file MP4 30s Full HD, vui lòng mở trên bản Local Server (http://localhost:5173).'
+    );
+  }
+  return fetchApiJson(`/api/factory/projects/${projectId}/launch`, {
+    method: 'POST',
+  });
+}
+
+export async function stitchFactoryProjectApi(
+  projectId: string
+): Promise<{ project: FactoryProject }> {
+  if (cloudModeActive) {
+    throw new Error('Ghép nối FFmpeg cần chạy trên bản Local Server.');
+  }
+  return fetchApiJson(`/api/factory/projects/${projectId}/stitch`, {
+    method: 'POST',
   });
 }

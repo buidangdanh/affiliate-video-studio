@@ -6,6 +6,7 @@ import {
   Clapperboard,
   Clock,
   ExternalLink,
+  Factory,
   FileSpreadsheet,
   Filter,
   Flame,
@@ -43,6 +44,7 @@ interface AffiliateRadarDashboardProps {
   hasGeminiApiKey: boolean;
   onSnapshotUpdated: (next: AffiliateRadarSnapshot) => void;
   onPushProductToVideo: (product: AffiliateProduct, customPrompt?: string) => void;
+  onOpenFactory5Scene: (product: AffiliateProduct) => void;
   onPushBatchToVideo: (items: Array<{ name: string; prompt: string }>) => void;
   onNotify: (msg: string, type?: 'success' | 'error') => void;
 }
@@ -89,6 +91,7 @@ export const AffiliateRadarDashboard: React.FC<AffiliateRadarDashboardProps> = (
   hasGeminiApiKey,
   onSnapshotUpdated,
   onPushProductToVideo,
+  onOpenFactory5Scene,
   onPushBatchToVideo,
   onNotify,
 }) => {
@@ -713,27 +716,46 @@ export const AffiliateRadarDashboard: React.FC<AffiliateRadarDashboardProps> = (
                   </div>
 
                   {/* Card Footer Buttons */}
-                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/70">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/70">
                     <button
                       type="button"
                       onClick={() => openProductById(entry.productId)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition"
                     >
                       <Store className="w-3.5 h-3.5 text-emerald-400" />
-                      Xem Dữ Kiện & Các Shop Uy Tín
+                      Chi Tiết & Shop
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const fullProd = snapshot.products.find((p) => p.id === entry.productId);
-                        if (fullProd) onPushProductToVideo(fullProd);
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-bold text-white transition"
-                    >
-                      <Clapperboard className="w-3.5 h-3.5" />
-                      Tạo Video 9:16
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fullProd = snapshot.products.find(
+                            (p) => p.id === entry.productId
+                          );
+                          if (fullProd) onOpenFactory5Scene(fullProd);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1.5 text-xs font-bold text-white transition"
+                        title="Dựng kịch bản 5 cảnh Kho Xưởng (30s) chuẩn Xuân Chiến AI"
+                      >
+                        <Factory className="w-3.5 h-3.5" />
+                        Xưởng 5 Cảnh (30s)
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fullProd = snapshot.products.find(
+                            (p) => p.id === entry.productId
+                          );
+                          if (fullProd) onPushProductToVideo(fullProd);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1.5 text-xs font-bold text-white transition"
+                      >
+                        <Clapperboard className="w-3.5 h-3.5" />
+                        1 Cảnh
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -985,22 +1007,31 @@ export const AffiliateRadarDashboard: React.FC<AffiliateRadarDashboardProps> = (
                     </div>
 
                     {/* Action Row */}
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-slate-800/80">
                       <button
                         type="button"
                         onClick={() => setSelectedProduct(p)}
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition"
+                        className="flex-1 inline-flex items-center justify-center gap-1 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-2.5 py-2 text-xs font-semibold text-slate-200 transition"
                       >
                         <Star className="w-3.5 h-3.5 text-amber-400" />
-                        Chi Tiết & {p.reputableSellers.length} Shop
+                        Chi Tiết ({p.reputableSellers.length} Shop)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onOpenFactory5Scene(p)}
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-2.5 py-2 text-xs font-bold text-white transition"
+                        title="Dựng kịch bản 5 cảnh Kho Xưởng (30s)"
+                      >
+                        <Factory className="w-3.5 h-3.5" />
+                        5 Cảnh 30s
                       </button>
                       <button
                         type="button"
                         onClick={() => onPushProductToVideo(p)}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-xs font-bold text-white transition"
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-2.5 py-2 text-xs font-bold text-white transition"
                       >
                         <Clapperboard className="w-3.5 h-3.5" />
-                        Video AI
+                        1 Cảnh
                       </button>
                     </div>
                   </div>

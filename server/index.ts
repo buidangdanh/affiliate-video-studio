@@ -10,6 +10,7 @@ import { queueManager } from './queueManager.ts';
 import { flowManager } from './flowAutomation.ts';
 import { verifyGeminiApiKey } from './videoGenerator.ts';
 import { affiliateEngine } from './affiliateEngine.ts';
+import { factoryStudio } from './factoryStudioEngine.ts';
 import type { CreateJobInput, ProviderMode, UploadedAsset } from './types.ts';
 import type { ScoringStrategy, SeasonId } from './affiliateTypes.ts';
 
@@ -64,6 +65,7 @@ app.get('/api/state', async (_req, res) => {
     settings: store.getPublicSettings(),
     flowStatus,
     affiliate: affiliateEngine.getSnapshot(),
+    factoryProjects: factoryStudio.getProjects(),
   });
 });
 
@@ -84,6 +86,7 @@ app.get('/api/events', (req, res) => {
     stats: queueManager.getStats(),
     settings: store.getPublicSettings(),
     affiliate: affiliateEngine.getSnapshot(),
+    factoryProjects: factoryStudio.getProjects(),
   });
 
   const onQueueEvent = (payload: unknown) => {
@@ -94,8 +97,13 @@ app.get('/api/events', (req, res) => {
     sendEvent(payload);
   };
 
+  const onFactoryEvent = (payload: unknown) => {
+    sendEvent(payload);
+  };
+
   queueManager.on('event', onQueueEvent);
   affiliateEngine.on('event', onAffiliateEvent);
+  factoryStudio.on('event', onFactoryEvent);
 
   const heartbeat = setInterval(() => {
     res.write(': heartbeat\n\n');
@@ -105,6 +113,7 @@ app.get('/api/events', (req, res) => {
     clearInterval(heartbeat);
     queueManager.off('event', onQueueEvent);
     affiliateEngine.off('event', onAffiliateEvent);
+    factoryStudio.off('event', onFactoryEvent);
   });
 });
 
@@ -472,6 +481,103 @@ app.post('/api/affiliate/import', (req, res) => {
   }
   const result = affiliateEngine.importProductsFromRecords(records);
   res.json(result);
+});
+
+// ====================================================
+// Factory 5-Scene AIDA Storyboard & Auto-Stitch Studio
+// ====================================================
+
+app.get('/api/factory/projects', (_req, res) => {
+  res.json({ projects: factoryStudio.getProjects() });
+});
+
+app.post('/api/factory/generate-script', async (req, res) => {
+  try {
+    const result = await factoryStudio.generateStoryboardScript(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Không thể tạo kịch bản 5 cảnh.',
+    });
+  }
+});
+
+app.post('/api/factory/projects', (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.productName || !Array.isArray(body.scenes) || body.scenes.length === 0) {
+      res.status(400).json({ error: 'Thiếu tên sản phẩm hoặc danh sách phân cảnh.' });
+      return;
+    }
+    const project = factoryStudio.createOrUpdateProject(body);
+    res.json({ project });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : 'Lỗi lưu dự án 5 cảnh.',
+    });
+  }
+});
+
+app.post('/api/factory/projects/:id/generate-keyframes', async (req, res) => {
+  try {
+    const result = await factoryStudio.generateProjectKeyframes(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Không thể tạo bộ 5 ảnh khung đầu 9:16.',
+    });
+  }
+});
+
+app.post('/api/factory/projects/:id/launch', (req, res) => {
+  try {
+    const result = factoryStudio.launchProjectVideoBatch(req.params.id);
+    res.json({
+      ...result,
+      stats: queueManager.getStats(),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Không thể khởi chạy hàng loạt 5 phân cảnh.',
+    });
+  }
+});
+
+app.post('/api/factory/projects/:id/stitch', async (req, res) => {
+  try {
+    const project = await factoryStudio.stitchCompletedScenes(req.params.id);
+    res.json({ project });
+  } catch (err) {
+    res.status(400).json({
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Không thể ghép nối các phân cảnh thành video MP4.',
+    });
+  }
+});
+
+app.get('/api/factory/projects/:id/download', (req, res) => {
+  const project = factoryStudio.getProjectById(req.params.id);
+  if (!project || !project.stitchedOutput) {
+    res.status(404).json({ error: 'Chưa có video ghép hoàn chỉnh cho dự án này.' });
+    return;
+  }
+  const fullPath = path.join(OUTPUTS_DIR, project.stitchedOutput.filename);
+  if (!fs.existsSync(fullPath)) {
+    res.status(404).json({ error: 'File MP4 ghép không tồn tại trên ổ đĩa.' });
+    return;
+  }
+  res.download(fullPath, project.stitchedOutput.filename);
 });
 
 if (process.env.NODE_ENV === 'production') {

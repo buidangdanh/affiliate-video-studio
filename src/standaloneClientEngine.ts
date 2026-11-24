@@ -6,6 +6,18 @@ import {
   generateHourlySeries,
   SEASON_DEFINITIONS,
 } from '../server/affiliateSeedData.ts';
+import {
+  buildFallback5SceneStoryboard,
+  buildMasterPromptVerbatim,
+  composeThreeBlockVideoPrompt6s,
+} from '../server/factoryPromptBuilder.ts';
+import type {
+  AidaStage,
+  FactoryProject,
+  FactorySceneItem,
+  FactoryStylePreset,
+  McOutfitPreset,
+} from './factoryTypes';
 import type {
   AffiliateProduct,
   AffiliateRadarSnapshot,
@@ -31,6 +43,7 @@ import type {
 const LS_AFFILIATE_KEY = 'tao_affiliate_cloud_state_v1';
 const LS_SETTINGS_KEY = 'tao_video_cloud_settings_v1';
 const LS_JOBS_KEY = 'tao_video_cloud_jobs_v1';
+const LS_FACTORY_KEY = 'tao_factory_cloud_projects_v1';
 
 function getVietnamDateString(date = new Date()): string {
   const vnTime = new Date(date.getTime() + 7 * 3600_000);
@@ -926,6 +939,220 @@ Chỉ trả về JSON hợp lệ theo mẫu:
       jobs: created,
       stats: this.getStats(),
     };
+  }
+
+  // ==========================================
+  // Factory 5-Scene Storyboard (Cloud Mode)
+  // ==========================================
+
+  public getFactoryProjects(): FactoryProject[] {
+    try {
+      const raw = localStorage.getItem(LS_FACTORY_KEY);
+      if (raw) return JSON.parse(raw) as FactoryProject[];
+    } catch {
+      // Ignore
+    }
+    return [];
+  }
+
+  private saveFactoryProjects(projects: FactoryProject[]): void {
+    try {
+      localStorage.setItem(LS_FACTORY_KEY, JSON.stringify(projects.slice(0, 20)));
+    } catch {
+      // Ignore
+    }
+  }
+
+  public async generateFactoryScriptCloud(input: {
+    productName: string;
+    productHighlights?: string;
+    stylePreset?: FactoryStylePreset;
+    mcOutfitPreset?: McOutfitPreset;
+  }): Promise<{
+    usedAiVision: boolean;
+    masterPromptUsed: string;
+    scenes: FactorySceneItem[];
+  }> {
+    const productName = (input.productName || '').trim() || 'Sản Phẩm Gia Dụng Thông Minh';
+    const productHighlights = (input.productHighlights || '').trim();
+    const stylePreset = input.stylePreset || 'factory_conveyor';
+    const mcOutfitPreset = input.mcOutfitPreset || 'cream_polo';
+
+    const apiKey = this.loadSettings().geminiApiKey.trim();
+    if (!apiKey) {
+      return {
+        usedAiVision: false,
+        ...buildFallback5SceneStoryboard({
+          productName,
+          productHighlights,
+          stylePreset,
+          mcOutfitPreset,
+        }),
+      };
+    }
+
+    try {
+      const masterPromptUsed = buildMasterPromptVerbatim(
+        productName,
+        productHighlights,
+        stylePreset,
+        mcOutfitPreset
+      );
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `${masterPromptUsed}
+Trả về DUY NHẤT một JSON gồm 5 phân cảnh theo cấu trúc:
+{
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "title": "Tiêu đề ngắn",
+      "cameraAngle": "Góc máy dọc 9:16",
+      "imagePrompt916": "Câu lệnh tiếng Việt tạo ảnh dọc 9:16 chân thực tại nhà xưởng...",
+      "actionAndCameraVi": "Mô tả hành động 6 giây của MC và camera...",
+      "spokenDialogueVi": "Đúng 1 câu thoại tiếng Việt khoảng 15-18 chữ vừa khít 6 giây"
+    }
+  ]
+}`,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.45,
+              responseMimeType: 'application/json',
+            },
+          }),
+        }
+      );
+
+      const data = await res.json();
+      const text =
+        data.candidates?.[0]?.content?.parts
+          ?.map((p: { text?: string }) => p.text || '')
+          .join('') || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('Invalid JSON');
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        scenes?: Array<{
+          title?: string;
+          cameraAngle?: string;
+          imagePrompt916?: string;
+          actionAndCameraVi?: string;
+          spokenDialogueVi?: string;
+        }>;
+      };
+      if (!Array.isArray(parsed.scenes) || parsed.scenes.length < 3) {
+        throw new Error('Insufficient scenes');
+      }
+
+      const aidaStages: AidaStage[] = [
+        'Attention (Thu hút tại xưởng)',
+        'Interest (Chất liệu & Thiết kế)',
+        'Interest (Dung tích & Thông số)',
+        'Desire (Test thực tế)',
+        'Action (Kho hàng & Chốt giỏ)',
+      ];
+      const shortName = productName.split(' ').slice(0, 7).join(' ');
+
+      const scenes: FactorySceneItem[] = parsed.scenes.slice(0, 5).map((s, idx) => {
+        const spokenDialogueVi = s.spokenDialogueVi || `Tham khảo ngay ${shortName} tại giỏ hàng nhé!`;
+        return {
+          sceneNumber: idx + 1,
+          aidaStage: aidaStages[idx] || 'Interest (Chất liệu & Thiết kế)',
+          title: s.title || `Cảnh ${idx + 1}`,
+          cameraAngle: s.cameraAngle || 'Góc dọc 9:16 nhà xưởng',
+          imagePrompt916: s.imagePrompt916 || '',
+          spokenDialogueVi,
+          videoPrompt6s: composeThreeBlockVideoPrompt6s({
+            productName: shortName,
+            actionAndCameraVi: s.actionAndCameraVi || 'MC cầm sản phẩm giới thiệu tự nhiên.',
+            spokenDialogueVi,
+          }),
+          durationSeconds: 6,
+          keyframeAsset: null,
+          linkedJobId: null,
+        };
+      });
+
+      return { usedAiVision: true, masterPromptUsed, scenes };
+    } catch {
+      return {
+        usedAiVision: false,
+        ...buildFallback5SceneStoryboard({
+          productName,
+          productHighlights,
+          stylePreset,
+          mcOutfitPreset,
+        }),
+      };
+    }
+  }
+
+  public saveFactoryProjectCloud(payload: {
+    id?: string;
+    productName: string;
+    productHighlights?: string;
+    stylePreset?: FactoryStylePreset;
+    mcOutfitPreset?: McOutfitPreset;
+    videoModel?: string;
+    masterPromptUsed?: string;
+    scenes: FactorySceneItem[];
+  }): FactoryProject {
+    const list = this.getFactoryProjects();
+    const nowIso = new Date().toISOString();
+    const existingIdx = payload.id ? list.findIndex((p) => p.id === payload.id) : -1;
+
+    if (existingIdx >= 0) {
+      const updated: FactoryProject = {
+        ...list[existingIdx],
+        productName: payload.productName,
+        productHighlights: payload.productHighlights || '',
+        stylePreset: payload.stylePreset || list[existingIdx].stylePreset,
+        mcOutfitPreset: payload.mcOutfitPreset || list[existingIdx].mcOutfitPreset,
+        videoModel: payload.videoModel || list[existingIdx].videoModel,
+        masterPromptUsed: payload.masterPromptUsed || list[existingIdx].masterPromptUsed,
+        scenes: payload.scenes,
+        updatedAt: nowIso,
+      };
+      list[existingIdx] = updated;
+      this.saveFactoryProjects(list);
+      return updated;
+    }
+
+    const created: FactoryProject = {
+      id: `cloud-factory-${Date.now()}`,
+      productName: payload.productName,
+      productHighlights: payload.productHighlights || '',
+      stylePreset: payload.stylePreset || 'factory_conveyor',
+      mcOutfitPreset: payload.mcOutfitPreset || 'cream_polo',
+      videoModel: payload.videoModel || 'gemini-omni-1.1-flash',
+      productAssets: [],
+      mcFaceAsset: null,
+      masterPromptUsed: payload.masterPromptUsed || '',
+      scenes: payload.scenes,
+      status: 'draft',
+      statusMessage:
+        'Đã sinh trọn bộ 5 phân cảnh AIDA Kho Xưởng. Bạn có thể copy từng câu lệnh sang Google Flow hoặc chạy bản Local để tự động render & ghép MP4 30s!',
+      stitchedOutput: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    list.unshift(created);
+    this.saveFactoryProjects(list);
+    return created;
   }
 }
 

@@ -14,6 +14,11 @@ Hệ thống tích hợp **Săn Sản Phẩm Affiliate Mua Nhiều Theo Mùa (Sh
   - Chấm điểm 4 trụ cột: *Độ khớp mùa vụ (25đ) + Tốc độ mua giờ/ngày (30đ) + Hiệu quả hoa hồng & cơ hội KOC (25đ) + Uy tín nhà bán hàng (20đ)*.
   - Đẩy lẻ từng sản phẩm hoặc **Đẩy cả Top 10 sang Tạo Video AI khung dọc 9:16** kèm kịch bản Hook 3 giây đầu chỉ với 1 cú click.
 
+## Xưởng Tạo Video Affiliate 5 Cảnh — Chuẩn Kho Xưởng AIDA 30s (Mới)
+- **Tự động phân tích ảnh sản phẩm & viết kịch bản 5 phân cảnh AIDA (`5 × 6s = 30s`)** theo phong cách trực tiếp tại dây chuyền nhà xưởng / tổng kho xuất hàng.
+- **Khoá đồng nhất 100% Nhân Vật MC & Sản Phẩm**: Hỗ trợ tải 1–5 ảnh sản phẩm thực tế từ sàn + 1 ảnh gương mặt MC mẫu; tự động neo bối cảnh Cảnh 1 cho các Cảnh 2–5.
+- **Tự động tạo thoại tiếng Việt nhép môi & Ghép nối Full HD (`1080x1920`, `30fps`)**: Dùng `Omni 1.1 / 1.2 Flash` hoặc `Google Flow` render 5 cảnh `6 giây`, sau đó `FFmpeg` tự động nối liền mạch thành **1 file MP4 dài 30 giây hoàn chỉnh** không cần ghép thủ công trên CapCut.
+
 ## Tính năng Tạo Video AI Hàng Loạt
 - **Nhập danh sách job hàng loạt (20–50+ jobs)**:
   - Nhập trực tiếp và tuỳ chỉnh chi tiết từng dòng trong bảng.

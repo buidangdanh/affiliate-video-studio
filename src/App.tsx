@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clapperboard,
   Columns2,
+  Factory,
   Flame,
   ListChecks,
   PlusSquare,
@@ -18,6 +19,7 @@ import type {
   VideoJob,
 } from './types';
 import type { AffiliateProduct, AffiliateRadarSnapshot } from './affiliateTypes';
+import type { FactoryProject } from './factoryTypes';
 import {
   cancelSingleJob,
   clearQueueJobs,
@@ -33,8 +35,9 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { createEmptyDraft, DraftJobList } from './components/DraftJobList';
 import { QueueDashboard } from './components/QueueDashboard';
 import { AffiliateRadarDashboard } from './components/AffiliateRadarDashboard';
+import { FactoryStoryboardStudio } from './components/FactoryStoryboardStudio';
 
-type ActiveView = 'affiliate' | 'composer' | 'queue' | 'both';
+type ActiveView = 'affiliate' | 'factory5' | 'composer' | 'queue' | 'both';
 
 interface ToastMessage {
   id: number;
@@ -88,6 +91,9 @@ export const App: React.FC = () => {
   const [flowStatus, setFlowStatus] = useState<FlowBrowserStatus | null>(null);
   const [affiliateSnapshot, setAffiliateSnapshot] =
     useState<AffiliateRadarSnapshot | null>(null);
+  const [factoryProjects, setFactoryProjects] = useState<FactoryProject[]>([]);
+  const [factoryPrefillProduct, setFactoryPrefillProduct] =
+    useState<AffiliateProduct | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>('affiliate');
   const [submitting, setSubmitting] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
@@ -123,8 +129,15 @@ export const App: React.FC = () => {
             if (data.stats) setStats(data.stats);
             if (data.settings) setSettings(data.settings);
             if (data.affiliate) setAffiliateSnapshot(data.affiliate);
+            if (Array.isArray(data.factoryProjects)) {
+              setFactoryProjects(data.factoryProjects);
+            }
           } else if (data.type === 'affiliate_updated' && data.snapshot) {
             setAffiliateSnapshot(data.snapshot);
+          } else if (data.type === 'factory_updated') {
+            if (Array.isArray(data.projects)) {
+              setFactoryProjects(data.projects);
+            }
           } else if (data.type === 'job_updated' && data.job) {
             const updated: VideoJob = data.job;
             setJobs((prev) => {
@@ -166,6 +179,9 @@ export const App: React.FC = () => {
           fetchAffiliateSnapshot()
             .then(setAffiliateSnapshot)
             .catch(console.error);
+        }
+        if (Array.isArray(data.factoryProjects)) {
+          setFactoryProjects(data.factoryProjects);
         }
         if (data.jobs.some((j) => j.status === 'running' || j.status === 'queued')) {
           setActiveView('queue');
@@ -358,6 +374,18 @@ export const App: React.FC = () => {
     [notify]
   );
 
+  const handleOpenFactory5Scene = useCallback(
+    (product: AffiliateProduct) => {
+      setFactoryPrefillProduct(product);
+      setActiveView('factory5');
+      notify(
+        `Đang mở Xưởng Video 5 Cảnh (30s) cho "${product.name.slice(0, 38)}..."`,
+        'success'
+      );
+    },
+    [notify]
+  );
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-slate-950/90 backdrop-blur-md">
@@ -393,7 +421,20 @@ export const App: React.FC = () => {
                 }`}
               >
                 <Flame className="w-3.5 h-3.5" />
-                Săn SP Affiliate & Top 10 ({affiliateSnapshot?.products.length ?? 0})
+                Săn SP & Top 10 ({affiliateSnapshot?.products.length ?? 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView('factory5')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition ${
+                  activeView === 'factory5'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow'
+                    : 'text-emerald-300/90 hover:text-emerald-200'
+                }`}
+              >
+                <Factory className="w-3.5 h-3.5" />
+                Xưởng Video 5 Cảnh (30s)
               </button>
 
               <button
@@ -481,7 +522,33 @@ export const App: React.FC = () => {
             hasGeminiApiKey={settings.hasGeminiApiKey}
             onSnapshotUpdated={setAffiliateSnapshot}
             onPushProductToVideo={handlePushProductToVideo}
+            onOpenFactory5Scene={handleOpenFactory5Scene}
             onPushBatchToVideo={handlePushBatchToVideo}
+            onNotify={notify}
+          />
+        )}
+
+        {activeView === 'factory5' && (
+          <FactoryStoryboardStudio
+            affiliateProducts={affiliateSnapshot?.products || []}
+            projects={factoryProjects}
+            jobs={jobs}
+            isCloudMode={isCloudMode}
+            prefillProduct={factoryPrefillProduct}
+            onClearPrefill={() => setFactoryPrefillProduct(null)}
+            onProjectsUpdated={setFactoryProjects}
+            onJobsLaunched={(newJobs, nextStats) => {
+              setJobs((prev) => [...prev, ...newJobs]);
+              setStats(nextStats);
+            }}
+            onPushScenesToDrafts={(newDrafts) => {
+              setDrafts(newDrafts);
+              setActiveView('composer');
+              notify(
+                'Đã đẩy 5 phân cảnh (6s • 9:16) sang bảng Tạo Video AI!',
+                'success'
+              );
+            }}
             onNotify={notify}
           />
         )}
