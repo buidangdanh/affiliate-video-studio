@@ -820,6 +820,13 @@ class FlowBrowserManager {
     const validPaths = filePaths.filter((p) => fs.existsSync(p));
     if (validPaths.length === 0) return;
 
+    if (validPaths.length > 1 && slotTrigger === 'ingredient') {
+      for (const singlePath of validPaths) {
+        await this.attachFileViaPickerSlot(page, slotTrigger, [singlePath]);
+      }
+      return;
+    }
+
     let slotBtn;
     if (slotTrigger === 'start_frame') {
       slotBtn = page.locator('button:visible').filter({ hasText: /(Bắt đầu|Start)/i }).first();
@@ -910,13 +917,12 @@ class FlowBrowserManager {
 
     await editor.waitFor({ state: 'visible', timeout: 15_000 });
     await editor.click();
-    await page.keyboard.press('Control+A').catch(() => {});
-    await page.keyboard.press('Backspace').catch(() => {});
+    // Move cursor to the end so any inline ingredient chips attached earlier are preserved!
+    await page.keyboard.press('End').catch(() => {});
     await page.waitForTimeout(150);
 
-    // Adapt "Tạo video 6 giây" cleanly if Flow's active model uses 8s default so speech never clips
     const cleanPrompt = prompt.trim();
-    await page.keyboard.insertText(cleanPrompt);
+    await page.keyboard.insertText(` ${cleanPrompt}`);
     await page.waitForTimeout(500);
 
     const submitBtn = page
@@ -1161,9 +1167,6 @@ class FlowBrowserManager {
         // Ensure grid view, close Agent chat drawer, disable "Tác nhân Flow" spark switch & clear composer!
         await this.prepareProjectGridWorkspace(page);
 
-        // Snapshot baseline grid state (top-most anchor + all existing image/video srcs)
-        const baseline = await this.snapshotGridBaseline(page);
-
         onProgress(
           18,
           `[Google Flow] Đang thiết lập chế độ Video (${job.aspectRatio}, x${Math.min(4, job.outputCount || 1)})...`
@@ -1187,6 +1190,10 @@ class FlowBrowserManager {
             await this.attachFileViaPickerSlot(page, 'end_frame', [lastPath]);
           }
         }
+
+        // Snapshot baseline AFTER uploading frames so uploaded media tiles are already in baseline!
+        await page.waitForTimeout(800);
+        const baseline = await this.snapshotGridBaseline(page);
 
         onProgress(32, '[Google Flow] Đang nhập câu lệnh vào ô ProseMirror và nhấn Bắt đầu tạo...');
         await this.fillPromptAndSubmit(page, job.prompt);
@@ -1328,7 +1335,6 @@ class FlowBrowserManager {
         }
 
         await this.prepareProjectGridWorkspace(page);
-        const baseline = await this.snapshotGridBaseline(page);
 
         // Configure Image -> 9:16 -> x1
         const opened = await this.openSettingsPopup(page);
@@ -1371,6 +1377,10 @@ class FlowBrowserManager {
             params.referenceFilePaths.slice(0, 3)
           );
         }
+
+        // Snapshot baseline AFTER attaching ingredient uploads so uploaded 9:16 anchor tiles are ignored!
+        await page.waitForTimeout(1000);
+        const baseline = await this.snapshotGridBaseline(page);
 
         await this.fillPromptAndSubmit(page, params.prompt);
 

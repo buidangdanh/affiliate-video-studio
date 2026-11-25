@@ -550,7 +550,10 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
    * - Scenes 2..5 ALSO attach Scene 1's generated image as anchor (7-reference consistency lock!).
    * - Falls back cleanly to FFmpeg 1080x1920 vertical framing of uploaded product photos if no Gemini image model is available.
    */
-  public async generateProjectKeyframes(projectId: string): Promise<{
+  public async generateProjectKeyframes(
+    projectId: string,
+    opts?: { keepScene1?: boolean }
+  ): Promise<{
     usedAiImageModel: string | null;
     project: FactoryProject;
   }> {
@@ -569,6 +572,12 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
 
     for (let idx = 0; idx < project.scenes.length; idx++) {
       const scene = project.scenes[idx];
+      if (idx === 0 && opts?.keepScene1 && scene.keyframeAsset) {
+        scene1AnchorAsset = scene.keyframeAsset;
+        usedModelName = 'Google Flow • Nano Banana Pro (9:16)';
+        continue;
+      }
+
       const outFilename = `factory_frame_s${scene.sceneNumber}_${Date.now()}_${uuidv4().slice(0, 6)}.png`;
       const outPath = path.join(UPLOADS_DIR, outFilename);
       let generatedByAi = false;
@@ -579,8 +588,24 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
         if (idx > 0 && scene1AnchorAsset) {
           refPaths.push(path.join(UPLOADS_DIR, scene1AnchorAsset.filename));
         }
-        for (const pAsset of project.productAssets.slice(0, 5)) {
-          refPaths.push(path.join(UPLOADS_DIR, pAsset.filename));
+        if (idx === 0) {
+          for (const pAsset of project.productAssets.slice(0, 3)) {
+            refPaths.push(path.join(UPLOADS_DIR, pAsset.filename));
+          }
+        } else if (project.productAssets.length > 0) {
+          // Always include hero product photo + scene-matched secondary photo if available
+          const hero = project.productAssets[0];
+          const secondary =
+            project.productAssets[idx % project.productAssets.length];
+          if (secondary && secondary.id !== hero.id && idx === project.scenes.length - 1) {
+            refPaths.push(path.join(UPLOADS_DIR, secondary.filename));
+            refPaths.push(path.join(UPLOADS_DIR, hero.filename));
+          } else {
+            refPaths.push(path.join(UPLOADS_DIR, hero.filename));
+            if (secondary && secondary.id !== hero.id) {
+              refPaths.push(path.join(UPLOADS_DIR, secondary.filename));
+            }
+          }
         }
         if (project.mcFaceAsset) {
           refPaths.push(path.join(UPLOADS_DIR, project.mcFaceAsset.filename));
