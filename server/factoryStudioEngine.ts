@@ -14,6 +14,7 @@ import {
   UPLOADS_DIR,
 } from './store.ts';
 import { queueManager } from './queueManager.ts';
+import { flowManager } from './flowAutomation.ts';
 import type { CreateJobInput, UploadedAsset, VideoJob } from './types.ts';
 import type {
   AidaStage,
@@ -556,7 +557,10 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
     const project = this.getProjectById(projectId);
     if (!project) throw new Error('Không tìm thấy dự án kịch bản 5 cảnh.');
 
-    const apiKey = store.getSettings().geminiApiKey.trim();
+    const settings = store.getSettings();
+    const apiKey = settings.geminiApiKey.trim();
+    const useFlowForImages =
+      settings.providerMode === 'flow' || settings.providerMode === 'auto_flow_first';
     const imgModel = apiKey ? await this.resolveImageGenModel(apiKey) : null;
     const ai = apiKey && imgModel ? new GoogleGenAI({ apiKey }) : null;
 
@@ -569,7 +573,33 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
       const outPath = path.join(UPLOADS_DIR, outFilename);
       let generatedByAi = false;
 
-      if (ai && imgModel) {
+      // 1. Try Google Flow Nano Banana Pro 9:16 when Flow mode is active!
+      if (useFlowForImages) {
+        const refPaths: string[] = [];
+        if (idx > 0 && scene1AnchorAsset) {
+          refPaths.push(path.join(UPLOADS_DIR, scene1AnchorAsset.filename));
+        }
+        for (const pAsset of project.productAssets.slice(0, 5)) {
+          refPaths.push(path.join(UPLOADS_DIR, pAsset.filename));
+        }
+        if (project.mcFaceAsset) {
+          refPaths.push(path.join(UPLOADS_DIR, project.mcFaceAsset.filename));
+        }
+
+        const okFlowImg = await flowManager.generateFlowImage916({
+          prompt: scene.imagePrompt916,
+          referenceFilePaths: refPaths,
+          outPngPath: outPath,
+          flowProjectUrl: settings.flowProjectUrl,
+        });
+        if (okFlowImg && fs.existsSync(outPath)) {
+          generatedByAi = true;
+          usedModelName = 'Google Flow • Nano Banana Pro (9:16)';
+        }
+      }
+
+      // 2. Otherwise try Gemini API Image model if configured
+      if (!generatedByAi && ai && imgModel) {
         try {
           const parts: Array<Record<string, unknown>> = [];
           // Attach Scene 1 anchor image first for Scenes 2..5!
