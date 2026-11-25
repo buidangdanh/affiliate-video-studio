@@ -590,16 +590,22 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
         if (idx > 0 && scene1AnchorAsset) {
           refPaths.push(path.join(UPLOADS_DIR, scene1AnchorAsset.filename));
         }
+        // Prioritize user-supplied MC face anchor BEFORE product slices so slice(0, 3) never drops MC identity!
+        if (project.mcFaceAsset) {
+          refPaths.push(path.join(UPLOADS_DIR, project.mcFaceAsset.filename));
+        }
         if (idx === 0) {
           for (const pAsset of project.productAssets.slice(0, 3)) {
             refPaths.push(path.join(UPLOADS_DIR, pAsset.filename));
           }
         } else if (project.productAssets.length > 0) {
-          // Always include hero product photo + scene-matched secondary photo if available
           const hero = project.productAssets[0];
           const secondary =
             project.productAssets[idx % project.productAssets.length];
-          if (secondary && secondary.id !== hero.id && idx === project.scenes.length - 1) {
+          if (project.mcFaceAsset && secondary && secondary.id !== hero.id) {
+            // [scene1Anchor, mcFaceAsset, sceneMatchedProduct] = 3 slots
+            refPaths.push(path.join(UPLOADS_DIR, secondary.filename));
+          } else if (secondary && secondary.id !== hero.id && idx === project.scenes.length - 1) {
             refPaths.push(path.join(UPLOADS_DIR, secondary.filename));
             refPaths.push(path.join(UPLOADS_DIR, hero.filename));
           } else {
@@ -608,9 +614,6 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
               refPaths.push(path.join(UPLOADS_DIR, secondary.filename));
             }
           }
-        }
-        if (project.mcFaceAsset) {
-          refPaths.push(path.join(UPLOADS_DIR, project.mcFaceAsset.filename));
         }
 
         const okFlowImg = await flowManager.generateFlowImage916({
