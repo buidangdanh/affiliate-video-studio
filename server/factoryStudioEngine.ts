@@ -177,9 +177,8 @@ async function createFallback916FramePng(
 
   const sourcePath = sourceAsset ? path.join(UPLOADS_DIR, sourceAsset.filename) : null;
   if (sourcePath && fs.existsSync(sourcePath)) {
-    // Frame the uploaded product photo cleanly onto a 1080x1920 9:16 vertical studio canvas with subtle per-scene crop/zoom variation
-    const zoomFactor = 1 + ((sceneNumber - 1) % 3) * 0.06;
-    const vf = `scale=${Math.round(1080 * zoomFactor)}:${Math.round(1920 * zoomFactor)}:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:#111827,format=rgb24`;
+    // Frame the uploaded product photo cleanly onto a 1080x1920 9:16 vertical studio canvas
+    const vf = `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:#111827,format=rgb24`;
     await execFileAsync(
       ffmpegBin,
       ['-y', '-i', sourcePath, '-vf', vf, '-frames:v', '1', outPngPath],
@@ -552,7 +551,7 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
    */
   public async generateProjectKeyframes(
     projectId: string,
-    opts?: { keepScene1?: boolean }
+    opts?: { keepScene1?: boolean; keepExisting?: boolean }
   ): Promise<{
     usedAiImageModel: string | null;
     project: FactoryProject;
@@ -572,8 +571,11 @@ Hãy quan sát kỹ các hình ảnh sản phẩm đính kèm (màu sắc thực
 
     for (let idx = 0; idx < project.scenes.length; idx++) {
       const scene = project.scenes[idx];
-      if (idx === 0 && opts?.keepScene1 && scene.keyframeAsset) {
-        scene1AnchorAsset = scene.keyframeAsset;
+      if (
+        scene.keyframeAsset &&
+        (opts?.keepExisting || (idx === 0 && opts?.keepScene1))
+      ) {
+        if (idx === 0) scene1AnchorAsset = scene.keyframeAsset;
         usedModelName = 'Google Flow • Nano Banana Pro (9:16)';
         continue;
       }

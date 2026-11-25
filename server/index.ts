@@ -525,6 +525,7 @@ app.post('/api/factory/projects/:id/generate-keyframes', async (req, res) => {
   try {
     const result = await factoryStudio.generateProjectKeyframes(req.params.id, {
       keepScene1: Boolean(req.body?.keepScene1),
+      keepExisting: Boolean(req.body?.keepExisting),
     });
     res.json(result);
   } catch (err) {
