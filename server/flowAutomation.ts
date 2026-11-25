@@ -412,7 +412,7 @@ class FlowBrowserManager {
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(300);
 
-    // 1. Exit media detail view if "Xong" / "Done" button is visible at top-right
+    // 1. Exit video detail view ("Xong" / "Done") or image edit view ("arrow_back" on /edit/)
     const doneBtn = page
       .locator('button:visible')
       .filter({ hasText: /^(Xong|Done)$/i })
@@ -420,6 +420,17 @@ class FlowBrowserManager {
     if ((await doneBtn.count()) > 0) {
       await doneBtn.click({ timeout: 2500 }).catch(() => {});
       await page.waitForTimeout(800);
+    }
+    if (page.url().includes('/edit/')) {
+      const backBtn = page
+        .locator(
+          'button[aria-label*="Nút quay lại"]:visible, button[aria-label*="Back"]:visible'
+        )
+        .first();
+      if ((await backBtn.count()) > 0) {
+        await backBtn.click({ timeout: 2500 }).catch(() => {});
+        await page.waitForTimeout(900);
+      }
     }
 
     // 2. Close right-side conversational Agent drawer if open
